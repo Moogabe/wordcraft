@@ -2998,6 +2998,27 @@ mod tests {
         }
     }
 
+    /// Clicking Review › Language › Romanian makes the selection Romanian, and the entry then
+    /// shows checked.
+    #[test]
+    fn the_romanian_menu_entry_sets_the_language() {
+        use egui_kittest::kittest::{By, NodeT, Queryable};
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::from_text("Merg acasă")), crate::Services::default());
+        app.run("select.all", json!({})).unwrap();
+        let mut h = egui_kittest::Harness::builder().with_size(vec2(400.0, 900.0)).build_ui_state(language_menu, app);
+        h.run_steps(2);
+        let romanian = |h: &egui_kittest::Harness<'_, WordApp>| {
+            h.query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.trim_start_matches('✓').trim() == "Romanian")))
+                .map(|n| n.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(romanian(&h), [false], "one Romanian entry, not checked yet");
+        h.get(By::new().predicate(|n| n.label().is_some_and(|l| l.trim_start_matches('✓').trim() == "Romanian"))).click();
+        h.run_steps(2);
+        assert_eq!(h.state_mut().run("format.state", json!({})).unwrap()["lang"], "ro-RO");
+        assert_eq!(romanian(&h), [true], "the entry is checked now");
+    }
+
     #[test]
     fn indonesian_has_a_name_in_the_language_menu() {
         assert!(PROOFING_LANGUAGES.contains(&("id-ID", "Indonesian")));
