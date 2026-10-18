@@ -1055,6 +1055,25 @@ fn pcl6_symbol_draws_greater_equal() {
 }
 
 #[test]
+fn private_use_bullet_no_font_draws_shows_the_levels_default_bullet() {
+    // #1683: a level-2 bullet stored as a private-use code in a font that isn't installed was
+    // drawn from an installed icon font (U+F081 is the Twitter logo in Font Awesome).
+    let mut d = Document::from_text("one");
+    let id = d.numbering.add_list(wordcraft_doc::ListKind::Bullet);
+    for a in &mut d.numbering.abstracts {
+        if let Some(l) = a.levels.get_mut(1) {
+            l.text = "\u{F081}".into();
+            l.chr.font = Some("WordCraft Missing Font 1683".into());
+        }
+    }
+    d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 0), &|p| p.numbering = Some(wordcraft_doc::props::NumRef { num: id, level: 1 })).unwrap();
+    let l = lay(&d);
+    let label = l.pages[0].items.iter().find_map(|it| if let Placed::Lines { para, .. } = it { para.label.clone() } else { None }).unwrap();
+    assert_eq!(label.text, "\u{25CB}");
+    assert_eq!(label.glyphs.len(), 1);
+}
+
+#[test]
 fn wingdings_text_draws_and_reads_as_its_unicode_symbols() {
     // Word stores symbol-font text both ways: plain codes ("J" = smiley) and private-use codes
     // (U+F0FC = check mark, what `w:sym` writes).
@@ -1334,6 +1353,39 @@ fn headers_and_page_fields() {
     let c = l.caret_on(&Pos { story: StoryRef::Part(id), path: Path::top(0), off: 0 }, 1).unwrap();
     assert_eq!(c.page, 1);
     assert!(c.top > 700.0);
+}
+
+/// Spaces typed at the end of a line hang past the right margin (they don't wrap), but the caret
+/// after them stays at the margin, as in Word, instead of running off the page (#2146). A letter
+/// typed after them wraps to the next line. Same in the body and in a header.
+#[test]
+fn caret_after_hanging_spaces_stays_at_the_margin() {
+    let spaces = format!("a{}", " ".repeat(200));
+    for header in [false, true] {
+        for text in [spaces.clone(), format!("{spaces}b")] {
+            let mut d = Document::new();
+            let p = wordcraft_doc::Paragraph::with_text(&text, Default::default());
+            let pos = if header {
+                let id = d.add_part(wordcraft_doc::PartKind::Header, vec![wordcraft_doc::para_block(p)]);
+                d.last_section.headers.default = Some(id);
+                Pos { story: StoryRef::Part(id), path: Path::top(0), off: text.len() }
+            } else {
+                d.body = vec![wordcraft_doc::para_block(p)];
+                Pos::body(0, text.len())
+            };
+            let right = d.last_section.page_w - d.last_section.margin_right;
+            let l = lay(&d);
+            let items = if header { &l.pages[0].header } else { &l.pages[0].items };
+            let lines = items.iter().find_map(|it| if let Placed::Lines { para, .. } = it { Some(para.lines.len()) } else { None }).unwrap();
+            let c = l.caret(&pos).unwrap();
+            let typed = text.ends_with('b');
+            assert_eq!(lines, if typed { 2 } else { 1 }, "header {header}, letter typed {typed}");
+            assert!(c.x <= right + 0.5, "header {header}, letter typed {typed}: caret at {} past the margin at {right}", c.x);
+            if !typed {
+                assert!(c.x >= right - 0.5, "header {header}: the caret sits at the margin, after the spaces ({})", c.x);
+            }
+        }
+    }
 }
 
 #[test]
@@ -2289,6 +2341,59 @@ fn a_split_row_keeps_its_bottom_margin_and_widow_control() {
     assert!(l.pages[0].items.iter().all(|it| !matches!(it, Placed::Cell { .. })), "and the row with it");
 }
 
+/// When widow/orphan control leaves a cell of a row split across pages with nothing on the page,
+/// though its first line would fit, the whole row moves on: Word doesn't leave the other cells
+/// behind beside an empty one (observed with synthetic documents). A cell that keeps lines splits
+/// as usual.
+#[test]
+fn a_cell_emptied_by_widow_control_takes_its_row_to_the_next_page() {
+    use wordcraft_doc::props::LineSpacing;
+    // Letter, 1 inch margins: 648 pt of text. `filler` lines of exactly 14 pt, then a row whose
+    // second cell holds one paragraph of `lines` lines, 14 pt each.
+    let pages_of = |filler: usize, lines: usize, widow: bool| {
+        let exact =
+            ParaProps { line_spacing: Some(LineSpacing::Exactly(14.0)), space_before: Some(0.0), space_after: Some(0.0), ..Default::default() };
+        let text: Vec<String> = (0..filler).map(|i| format!("Filler {i}")).collect();
+        let mut d = Document::from_text(&format!("{}\nAfter", text.join("\n")));
+        for i in 0..=filler {
+            *para_props(&mut d, i) = exact.clone();
+        }
+        let mut t = Table::new(1, 2, 400.0);
+        t.props.cell_margins = Some([0.0, 5.4, 0.0, 5.4]);
+        let cell_para = |s: &str| {
+            let mut p = wordcraft_doc::Paragraph::with_text(s, Default::default());
+            p.props = ParaProps { widow_control: Some(widow), ..exact.clone() };
+            wordcraft_doc::para_block(p)
+        };
+        t.rows[0].cells[0].blocks = vec![cell_para("A1")];
+        let b: Vec<String> = (1..=lines).map(|i| format!("B{i}")).collect();
+        t.rows[0].cells[1].blocks = vec![cell_para(&b.join(&wordcraft_doc::para::LINE_BREAK.to_string()))];
+        d.insert_block(StoryRef::Body, &Path::top(filler), wordcraft_doc::Block::Table(t)).unwrap();
+        let l = lay(&d);
+        // Lines of each cell per page: (first cell, second cell).
+        l.pages
+            .iter()
+            .map(|p| {
+                let count = |cell: u32| {
+                    p.items
+                        .iter()
+                        .filter_map(|i| {
+                            if let Placed::Lines { path, l0, l1, .. } = i { (path.0 == [filler as u32, 0, cell, 0]).then_some(l1 - l0) } else { None }
+                        })
+                        .sum::<usize>()
+                };
+                (count(0), count(1))
+            })
+            .collect::<Vec<_>>()
+    };
+    // 44 filler lines leave 32 pt: two lines fit.
+    assert_eq!(pages_of(44, 4, true)[..2], [(1, 2), (0, 2)], "four lines split two and two");
+    assert_eq!(pages_of(44, 3, true)[..2], [(0, 0), (1, 3)], "two and a widow: the whole row moves");
+    assert_eq!(pages_of(44, 3, false)[..2], [(1, 2), (0, 1)], "without widow control it splits where it falls");
+    // 45 filler lines leave 18 pt: one line fits, an orphan.
+    assert_eq!(pages_of(45, 4, true)[..2], [(0, 0), (1, 4)], "an orphan: the whole row moves");
+}
+
 /// The cell's last paragraph needs its space after on the page too: a row ending in an empty
 /// paragraph with 8pt after, whose text fits but whose space after doesn't, splits before it
 /// (Word keeps the "Remarks:" line on the page) instead of moving whole.
@@ -3141,7 +3246,7 @@ fn footnotes_inside_text_boxes_are_numbered_and_placed() {
     let b = l.caret(&d.start_of(StoryRef::Part(after))).unwrap();
     assert_eq!((a.page, b.page), (0, 0));
     assert!(a.top > 600.0 && a.top < b.top, "{a:?} {b:?}");
-    let nums = note_numbers(&d, false);
+    let nums = note_numbers(&d, HideDeleted::default());
     assert_eq!((nums.get(&in_box), nums.get(&after)), (Some(&1), Some(&2)));
 }
 
@@ -3631,6 +3736,35 @@ fn floats_in_headers_and_table_cells_are_drawn() {
     assert!(c[0].x > 72.0 && c[0].x < 72.0 + 234.0, "inside the first cell: {:?}", c[0]);
 }
 
+/// Inside a text box whose shape style gives its text a colour (`a:fontRef`, typically white on
+/// the accent fill), automatic text takes that colour instead of black; text with a colour of
+/// its own keeps it (Word, observed with synthetic documents).
+#[test]
+fn automatic_text_in_a_styled_text_box_takes_the_box_s_colour() {
+    let glyph_colors = |auto_color: Option<Rgb>| {
+        let mut d = Document::from_text("Body");
+        let id = text_box(&mut d, 4, "Auto", 200.0, 60.0, page_float(100.0, 300.0));
+        if let Some(p) = d.parts.get_mut(&id) {
+            p.body.auto_color = auto_color;
+            if let Some(wordcraft_doc::Block::Para(q)) = p.blocks.first_mut().map(std::sync::Arc::make_mut) {
+                let mut own = wordcraft_doc::Paragraph::with_text("Green", Default::default());
+                own.runs[0].props.color = Some(wordcraft_doc::props::TextColor::Rgb(Rgb(0, 0x80, 0)));
+                q.text.push_str(&own.text);
+                q.runs.extend(own.runs);
+            }
+        }
+        let l = lay(&d);
+        let items = display::page_display(&d, &l.pages[0], &display::DisplayOptions::default());
+        let color_of = |want: &str| {
+            items.iter().find_map(|i| if let display::Draw::Glyphs { text, color, .. } = i { text.contains(want).then_some(*color) } else { None })
+        };
+        (color_of("Body"), color_of("Auto"), color_of("Green"))
+    };
+    let white = Rgb(0xFF, 0xFF, 0xFF);
+    assert_eq!(glyph_colors(Some(white)), (Some(Rgb::BLACK), Some(white), Some(Rgb(0, 0x80, 0))));
+    assert_eq!(glyph_colors(None), (Some(Rgb::BLACK), Some(Rgb::BLACK), Some(Rgb(0, 0x80, 0))));
+}
+
 #[test]
 fn wrap_area_uses_each_distance() {
     use wordcraft_doc::para::{Float, Wrap};
@@ -4073,9 +4207,9 @@ fn objects_left_out_through_the_table_style_formatting() {
     p.insert_object(1, rect_shape(10.0, 10.0, Default::default()), &Default::default()).unwrap();
     let d = Document::from_text("");
     let hidden = wordcraft_doc::CharProps { hidden: Some(true), ..Default::default() };
-    assert!(!left_out_objects(&d, &p, None, false, false)(0));
-    assert!(left_out_objects(&d, &p, Some(&hidden), false, false)(0));
-    assert!(!left_out_objects(&d, &p, Some(&hidden), true, false)(0), "hidden text shown");
+    assert!(!left_out_objects(&d, &p, None, false, HideDeleted::default())(0));
+    assert!(left_out_objects(&d, &p, Some(&hidden), false, HideDeleted::default())(0));
+    assert!(!left_out_objects(&d, &p, Some(&hidden), true, HideDeleted::default())(0), "hidden text shown");
 }
 
 #[test]
@@ -5396,7 +5530,7 @@ fn footnotes_restart_on_each_page_and_section() {
     d.settings.footnote_pr = NoteProps::default();
     d.para_mut(StoryRef::Body, &Path::top(49)).unwrap().section = Some(Box::new(SectionProps::default()));
     d.last_section.footnote_pr = NoteProps { num_restart: Some(NoteRestart::EachSect), num_start: Some(5), ..Default::default() };
-    let nums = note_numbers(&d, false);
+    let nums = note_numbers(&d, HideDeleted::default());
     assert_eq!((nums[&a], nums[&b], nums[&c]), (1, 2, 5));
 }
 
@@ -7245,6 +7379,46 @@ fn justified_multi_column_pages_stay_at_the_top() {
         para_boxes(&lay(&d))
     };
     assert_eq!(last(PageVAlign::Justify), last(PageVAlign::Top));
+}
+
+/// Gap #5 review: a paragraph deleted whole (text and mark) takes no room in the final text, and
+/// neither does moved-away text marked Hidden; the paragraph after it sits where it would without
+/// it, and a deletion that isn't left out keeps its line.
+#[test]
+fn a_paragraph_left_out_whole_takes_no_room() {
+    let mut d = Document::from_text("One\nGone\nThree");
+    d.format_range(&Pos::body(1, 0), &Pos::body(2, 0), &|c| c.del = Some(0)).unwrap();
+    let three_top =
+        |d: &Document, opts: &LayoutOptions, block: usize| layout(d, &mut LayoutCache::new(), opts).caret(&Pos::body(block, 0)).unwrap().top;
+    let without = three_top(&Document::from_text("One\nThree"), &LayoutOptions::default(), 1);
+    let fin = LayoutOptions { hide_deleted: true, ..Default::default() };
+    assert!((three_top(&d, &fin, 2) - without).abs() < 0.01, "no blank line in the final text");
+    assert!(three_top(&d, &LayoutOptions::default(), 2) > without + 1.0, "with markup it keeps its line");
+    // Only moved-away text hidden: an ordinary deletion keeps its line.
+    let moves = LayoutOptions { hide_marked: HideDeleted { plain: false, moved_from: true }, ..Default::default() };
+    assert!(three_top(&d, &moves, 2) > without + 1.0);
+    let plain = LayoutOptions { hide_marked: HideDeleted { plain: true, moved_from: false }, ..Default::default() };
+    assert!((three_top(&d, &plain, 2) - without).abs() < 0.01);
+}
+
+/// Gap #5 review: a paragraph left out whole draws no shading and no borders (they would be
+/// lines across the page at its zero height).
+#[test]
+fn a_paragraph_left_out_whole_draws_no_borders_or_shading() {
+    let mut d = Document::from_text("One\nGone\nThree");
+    let line = Some(Border::single(1.0));
+    d.format_paragraphs(&Pos::body(1, 0), &Pos::body(1, 0), &|p| {
+        p.borders = Some(Borders { top: line, left: line, bottom: line, right: line, ..Borders::default() });
+        p.shading = Some(wordcraft_doc::Rgb(0xEE, 0xEE, 0xEE));
+    })
+    .unwrap();
+    d.format_range(&Pos::body(1, 0), &Pos::body(2, 0), &|c| c.del = Some(0)).unwrap();
+    let decorations = |hide_deleted: bool| {
+        let l = layout(&d, &mut LayoutCache::new(), &LayoutOptions { hide_deleted, ..Default::default() });
+        l.pages[0].items.iter().filter(|i| matches!(i, Placed::Fill { .. } | Placed::Rule { .. })).count()
+    };
+    assert_eq!(decorations(false), 5, "shading and four borders with markup");
+    assert_eq!(decorations(true), 0, "none in the final text");
 }
 
 #[test]

@@ -136,5 +136,15 @@ real_name = "Andrej Škvorc"
 display_name = "Andrej Škvorc"
 sync_github_name = false
 
+[people.olekkut]
+real_name = "Aleksander Kutycki"
+display_name = "Aleksander Kutycki"
+sync_github_name = true
+
+[people.marcoarnulfo]
+real_name = "Marco Arnulfo"
+display_name = "Marco Arnulfo"
+sync_github_name = false
+
 [people.moogabe]
 display_name = "Jan de la Alderaan"
