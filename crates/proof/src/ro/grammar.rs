@@ -214,9 +214,13 @@ fn nici_apart(text: &str, ws: &[(usize, usize)], v: &mut Vec<Issue>) {
         // in the same sentence counts.
         let mut correlative = false;
         for (j, (a, b)) in ws.iter().enumerate().skip(k + 2) {
-            let prev_end = ws.get(j.saturating_sub(1)).map(|p| p.1).unwrap_or(*a);
-            let gap = text.get(prev_end..*a).unwrap_or("");
-            if gap.contains(['.', '!', '?']) {
+            let prev = ws.get(j.saturating_sub(1)).copied().unwrap_or((*a, *a));
+            let gap = text.get(prev.1..*a).unwrap_or("");
+            // A sentence end stops the search; the period of an abbreviation or number (`nr.`,
+            // `5.`) doesn't.
+            let prev_word = text.get(prev.0..prev.1).unwrap_or("");
+            let abbreviation = gap.trim_start().starts_with('.') && !gap.contains("..") && abbreviation_or_number(prev_word);
+            if gap.contains(['!', '?']) || (gap.contains('.') && !abbreviation) {
                 break;
             }
             if gap.contains(',') && text.get(*a..*b).is_some_and(|w| is_word(w, "nici")) {
@@ -339,6 +343,8 @@ mod tests {
         assert_eq!(messages("Nu am nici un ban. Nici el nu are."), ["Se scrie legat: „niciun”"]);
         // Any correlative `nici …, nici …` keeps the words apart (DOOM).
         assert!(check("N-am nici un frate, nici mai mulți.").is_empty());
+        // An abbreviation's period doesn't end the sentence the search runs through.
+        assert!(check("N-am nici un nr. de telefon, nici alt mijloc de contact.").is_empty());
         // All capitals stay all capitals; an initial capital stays initial.
         let v = check("NU AM NICI UN BAN.");
         assert_eq!(v.first().map(|i| i.suggestions[0].as_str()), Some("NICIUN"), "{v:?}");
