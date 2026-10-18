@@ -113,6 +113,9 @@ impl Collector<'_> {
 /// The MAP group of each letter (its other members are its likely confusions).
 fn alternatives(c: char, map: &[Vec<char>]) -> Vec<char> {
     let mut v: Vec<char> = map.iter().filter(|g| g.contains(&c)).flat_map(|g| g.iter().copied()).filter(|&x| x != c).collect();
+    // Groups overlap (`aăâî`, `iîâ`): `â` meets `î` twice. A repeat would repeat a whole subtree
+    // of variants.
+    v.sort_unstable();
     v.dedup();
     v
 }
@@ -128,27 +131,47 @@ fn map_cost(from: char, to: char) -> u32 {
     }
 }
 
-/// Every way of changing up to [`MAX_MAP_CHANGES`] letters to a MAP relative, with its cost.
-fn map_variants(chars: &[char], alts: &[Vec<char>], i: usize, changes: usize, cost: u32, buf: &mut Vec<char>, out: &mut Vec<(String, u32)>) {
-    if out.len() >= MAX_MAP_VARIANTS {
+/// Every way of changing up to [`MAX_MAP_CHANGES`] letters to a MAP relative, with its cost,
+/// one change first, then two… so the [`MAX_MAP_VARIANTS`] cap on a long word drops the
+/// dearest variants (many changes), never a cheap one-letter fix near its start.
+fn map_variants(chars: &[char], alts: &[Vec<char>], out: &mut Vec<(String, u32)>) {
+    let mut buf = Vec::with_capacity(chars.len());
+    for target in 1..=MAX_MAP_CHANGES {
+        if out.len() >= MAX_MAP_VARIANTS {
+            break;
+        }
+        variants_with(chars, alts, 0, target, 0, &mut buf, out);
+    }
+}
+
+/// The variants of `chars[i..]` with exactly `left` more changes, appended to `out` (bounded by
+/// [`MAX_MAP_VARIANTS`]).
+fn variants_with(chars: &[char], alts: &[Vec<char>], i: usize, left: usize, cost: u32, buf: &mut Vec<char>, out: &mut Vec<(String, u32)>) {
+    if out.len() >= MAX_MAP_VARIANTS || chars.len().saturating_sub(i) < left {
         return;
     }
     let Some(&c) = chars.get(i) else {
-        if changes > 0 {
+        if left == 0 {
             out.push((buf.iter().collect(), cost));
         }
         return;
     };
-    buf.push(c);
-    map_variants(chars, alts, i + 1, changes, cost, buf, out);
-    buf.pop();
-    if changes < MAX_MAP_CHANGES {
-        for &a in alts.get(i).map(Vec::as_slice).unwrap_or_default() {
-            buf.push(a);
-            map_variants(chars, alts, i + 1, changes + 1, cost + map_cost(c, a), buf, out);
-            buf.pop();
-        }
+    if left == 0 {
+        // Nothing more to change: the rest as it is.
+        let len = buf.len();
+        buf.extend_from_slice(chars.get(i..).unwrap_or_default());
+        out.push((buf.iter().collect(), cost));
+        buf.truncate(len);
+        return;
     }
+    for &a in alts.get(i).map(Vec::as_slice).unwrap_or_default() {
+        buf.push(a);
+        variants_with(chars, alts, i + 1, left - 1, cost + map_cost(c, a), buf, out);
+        buf.pop();
+    }
+    buf.push(c);
+    variants_with(chars, alts, i + 1, left, cost, buf, out);
+    buf.pop();
 }
 
 /// A letter's MAP representative (the first of its group), lower case: `ă` → `a`.
@@ -235,7 +258,7 @@ pub fn suggest_in(d: &AffixDict, word: &str, max: usize) -> Vec<String> {
     let map = d.map();
     let alts: Vec<Vec<char>> = chars.iter().map(|&c| alternatives(c, map)).collect();
     let mut variants = Vec::new();
-    map_variants(&chars, &alts, 0, 0, 0, &mut Vec::with_capacity(n), &mut variants);
+    map_variants(&chars, &alts, &mut variants);
     variants.sort_by_key(|v| v.1);
     for (v, cost) in &variants {
         col.offer(v, *cost);
@@ -439,6 +462,23 @@ mod tests {
         assert!(!suggest("casă", 5).contains(&"casă".to_string()));
         let _ = suggest("-", 5);
         let _ = suggest("a-", 5);
+    }
+
+    #[test]
+    fn long_words_keep_their_cheap_diacritic_fixes() {
+        // Many `a`/`i`/`s`/`t` letters: far more than MAX_MAP_VARIANTS variants with four changes.
+        // The one-change fixes come first, so `ș` at the start survives the cap.
+        let map = vec![vec!['a', 'ă', 'â', 'î'], vec!['i', 'î', 'â'], vec!['s', 'ș'], vec!['t', 'ț']];
+        let chars: Vec<char> = "stiintificitatea".chars().collect();
+        let alts: Vec<Vec<char>> = chars.iter().map(|&c| alternatives(c, &map)).collect();
+        // `â` is in both `aăâî` and `iîâ`: `î` is listed once.
+        assert_eq!(alternatives('â', &map), ['a', 'i', 'î', 'ă']);
+        let mut out = Vec::new();
+        map_variants(&chars, &alts, &mut out);
+        assert_eq!(out.len(), MAX_MAP_VARIANTS);
+        assert!(out.iter().any(|(v, c)| v == "știintificitatea" && *c == COST_ADD_DIACRITIC), "the one-letter fix is kept");
+        let pos = |k: usize| out.iter().position(|(v, _)| v.chars().zip(&chars).filter(|(a, b)| a != *b).count() == k);
+        assert!(pos(1) < pos(2) && pos(2).is_some(), "fewer changes come first");
     }
 
     #[test]

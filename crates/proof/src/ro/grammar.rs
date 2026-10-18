@@ -11,8 +11,8 @@
 //!   quote `„`.
 //! - **Doubled punctuation** (`,,`, `..`, `;;`).
 //! - **`nici un` / `nici o`** written apart where the norm (DOOM, 2005) joins them: `niciun`,
-//!   `nicio`, `niciunul`, `niciuna`… — not in the correlative pair `nici unul, nici altul` /
-//!   `nici una, nici alta`, where the words stay apart.
+//!   `nicio`, `niciunul`, `niciuna`… — not in the correlative `nici …, nici …` (`nici unul,
+//!   nici altul`, `nici un frate, nici mai mulți`), where the words stay apart.
 //! - **Missing comma before `ci` and `dar`** joining two clauses (`Nu vine azi ci mâine`), not
 //!   at a sentence start and not where `dar` is the noun (`un dar`, `de dar`).
 //!
@@ -122,8 +122,8 @@ fn repeated_words(text: &str, ws: &[(usize, usize)], v: &mut Vec<Issue>) {
         if !gap.is_empty()
             && gap.chars().all(char::is_whitespace)
             && w0.chars().all(char::is_alphabetic)
-            && w0.to_lowercase() == w1.to_lowercase()
-            && !ALLOWED_REPEATS.contains(&w0.to_lowercase().as_str())
+            && super::comma_below(&w0.to_lowercase()) == super::comma_below(&w1.to_lowercase())
+            && !ALLOWED_REPEATS.contains(&super::comma_below(&w0.to_lowercase()).as_str())
         {
             v.push(issue(*a0, *b1, format!("Cuvânt repetat: „{w1}”"), vec![w0.to_string()]));
         }
@@ -163,13 +163,15 @@ fn spaces(text: &str, v: &mut Vec<Issue>) {
 
 fn sentence_capitals(text: &str, ws: &[(usize, usize)], v: &mut Vec<Issue>) {
     let mut after_end = true;
-    for (a, b) in ws {
+    for (k, (a, b)) in ws.iter().enumerate() {
         let Some(w) = text.get(*a..*b) else { continue };
         if after_end && w.chars().next().is_some_and(char::is_lowercase) && w.chars().all(char::is_alphabetic) {
             let fixed: String = w.chars().next().map(|f| f.to_uppercase().chain(w.chars().skip(1)).collect()).unwrap_or_default();
             v.push(issue(*a, *b, "Majusculă la început de propoziție".into(), vec![fixed]));
         }
-        after_end = ends_sentence(text.get(*b..).unwrap_or(""), w);
+        // Only the gap up to the next word decides (`Salut. apoi`: `. ` ends the sentence).
+        let next = ws.get(k + 1).map_or(text.len(), |n| n.0);
+        after_end = ends_sentence(text.get(*b..next).unwrap_or(""), w);
     }
 }
 
@@ -198,7 +200,7 @@ fn is_word(w: &str, want: &str) -> bool {
     super::comma_below(&w.to_lowercase()) == want
 }
 
-/// `nici un`, `nici o` … written apart, except in `nici unul, nici altul`.
+/// `nici un`, `nici o` … written apart, except in the correlative `nici …, nici …`.
 fn nici_apart(text: &str, ws: &[(usize, usize)], v: &mut Vec<Issue>) {
     for (k, pair) in ws.windows(2).enumerate() {
         let [(a0, b0), (a1, b1)] = pair else { continue };
@@ -207,28 +209,28 @@ fn nici_apart(text: &str, ws: &[(usize, usize)], v: &mut Vec<Issue>) {
             continue;
         }
         let Some((_, joined)) = NICI_JOINED.iter().find(|(apart, _)| is_word(w1, apart)) else { continue };
-        // `nici unul, nici altul`: correlative `nici` with a pronoun, the words stay apart.
+        // Correlative `nici … , nici …` (`nici unul, nici altul`, `nici un frate, nici mai mulți`):
+        // `nici` is an adverb there and the words stay apart (DOOM). A later `nici` after a comma
+        // in the same sentence counts.
         let mut correlative = false;
-        if is_word(w1, "unul") || is_word(w1, "una") {
-            for (j, (a, b)) in ws.iter().enumerate().skip(k + 2) {
-                let prev_end = ws.get(j.saturating_sub(1)).map(|p| p.1).unwrap_or(*a);
-                if text.get(prev_end..*a).is_some_and(|g| g.contains(['.', '!', '?'])) {
-                    break;
-                }
-                let next = ws.get(j + 1).and_then(|(c, d)| text.get(*c..*d)).map(|w| super::comma_below(&w.to_lowercase()));
-                if text.get(*a..*b).is_some_and(|w| is_word(w, "nici")) && next.is_some_and(|w| w.starts_with("alt")) {
-                    correlative = true;
-                    break;
-                }
+        for (j, (a, b)) in ws.iter().enumerate().skip(k + 2) {
+            let prev_end = ws.get(j.saturating_sub(1)).map(|p| p.1).unwrap_or(*a);
+            let gap = text.get(prev_end..*a).unwrap_or("");
+            if gap.contains(['.', '!', '?']) {
+                break;
+            }
+            if gap.contains(',') && text.get(*a..*b).is_some_and(|w| is_word(w, "nici")) {
+                correlative = true;
+                break;
             }
         }
         if correlative {
             continue;
         }
-        let fixed = if w0.starts_with(char::is_uppercase) {
-            crate::affix::capitalize(joined)
-        } else if w0.chars().all(|c| !c.is_lowercase()) && w1.chars().all(|c| !c.is_lowercase()) {
+        let fixed = if w0.chars().all(|c| !c.is_lowercase()) && w1.chars().all(|c| !c.is_lowercase()) {
             joined.to_uppercase()
+        } else if w0.starts_with(char::is_uppercase) {
+            crate::affix::capitalize(joined)
         } else {
             (*joined).to_string()
         };
@@ -291,6 +293,17 @@ mod tests {
     }
 
     #[test]
+    fn a_lower_case_second_sentence_is_flagged() {
+        let v = check("Salut. apoi am plecat.");
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!((v[0].message.as_str(), v[0].suggestions[0].as_str()), ("Majusculă la început de propoziție", "Apoi"));
+        assert_eq!(&"Salut. apoi am plecat."[v[0].start..v[0].end], "apoi");
+        // After a quotation mark or bracket too; never after an abbreviation or an ellipsis.
+        assert_eq!(messages("A venit.” apoi a plecat."), ["Majusculă la început de propoziție"]);
+        assert!(check("Merge cu dl. Popescu... apoi pleacă.").is_empty());
+    }
+
+    #[test]
     fn romanian_grammar_stays_quiet() {
         for t in [
             "Merg la București. Dl. Popescu e deja acolo... încet încet!",
@@ -318,6 +331,11 @@ mod tests {
         assert!(check("Nici una, nici alta nu mi-a plăcut.").is_empty());
         assert_eq!(messages("Nu vreau nici unul. Nici altul."), ["Se scrie legat: „niciunul”"]);
         assert_eq!(messages("Nu am nici un ban. Nici el nu are."), ["Se scrie legat: „niciun”"]);
+        // Any correlative `nici …, nici …` keeps the words apart (DOOM).
+        assert!(check("N-am nici un frate, nici mai mulți.").is_empty());
+        // All capitals stay all capitals; an initial capital stays initial.
+        let v = check("NU AM NICI UN BAN.");
+        assert_eq!(v.first().map(|i| i.suggestions[0].as_str()), Some("NICIUN"), "{v:?}");
     }
 
     #[test]
@@ -336,5 +354,9 @@ mod tests {
         // `şi` with a cedilla is the same word as `și`.
         assert!(check("Merg şi eu.").is_empty());
         assert_eq!(messages("Nu am nici un leu."), ["Se scrie legat: „niciun”"]);
+        // Repeats are compared with the cedilla read as comma-below: `şcoală școală` repeats,
+        // and the allowed `puțin puțin` is allowed in either spelling.
+        assert_eq!(messages("Merg la şcoală școală."), ["Cuvânt repetat: „școală”"]);
+        assert!(check("Mai stai puţin puţin.").is_empty());
     }
 }

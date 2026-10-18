@@ -98,9 +98,11 @@ pub fn comma_below(word: &str) -> String {
         .collect()
 }
 
-/// Is `word` spelled correctly in Romanian? Numbers, single letters, short words in capitals
-/// (acronyms: `UE`, `CFR`), words with digits and words in other scripts are accepted, and so
-/// is every word when no Romanian dictionary is installed.
+/// Is `word` spelled correctly in Romanian? Numbers, single letters and words in other scripts
+/// are accepted, and so is every word when no Romanian dictionary is installed. Words in
+/// capitals (`UE`, `CFR`) and words with digits are left to File › Options › Proofing (the
+/// `ignore_uppercase` / `ignore_numbers` choices, applied by [`crate::is_correct_in_with`]): with
+/// them off, `CĂSUȚĂ` is checked like `căsuță`.
 pub fn is_correct(word: &str) -> bool {
     is_correct_with(&dictionary(), word)
 }
@@ -113,10 +115,7 @@ pub fn is_correct_with(d: &AffixDict, word: &str) -> bool {
     let w = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '-');
     let w = w.trim_matches('-');
     let n = w.chars().count();
-    if n <= 1 || w.chars().any(|c| c.is_ascii_digit()) || !w.chars().any(char::is_alphabetic) {
-        return true;
-    }
-    if w.chars().all(|c| !c.is_lowercase()) && n <= 6 {
+    if n <= 1 || !w.chars().any(char::is_alphabetic) {
         return true;
     }
     if !w.chars().any(is_latin_letter) {
@@ -200,7 +199,8 @@ mod tests {
             "lucrez",
             "lucrează",
             "reface",
-            "UE",
+            "CASĂ",
+            "ȚARĂ",
             "2026",
             "a",
             "niciun",
@@ -217,6 +217,21 @@ mod tests {
         for w in ["cîine", "mîine", "fataa", "lcurez", "casaă", "București-xqz", "într-xqz", "niciunn"] {
             assert!(!is_correct(w), "{w}");
         }
+    }
+
+    #[test]
+    fn capitals_and_digits_follow_the_proofing_options() {
+        test_dict::install();
+        // Word's defaults skip words in capitals and with digits…
+        for w in ["UE", "CFR", "CASAA", "B2B"] {
+            assert!(crate::is_correct_in(w, crate::ProofLang::Ro), "{w}");
+        }
+        // …and with those choices off they are checked against the dictionary.
+        let all = crate::Options { ignore_uppercase: false, ignore_numbers: false, ignore_internet: false };
+        for w in ["CASAA", "CÎINE", "B2B"] {
+            assert!(!crate::is_correct_in_with(w, crate::ProofLang::Ro, &all), "{w}");
+        }
+        assert!(crate::is_correct_in_with("CASĂ", crate::ProofLang::Ro, &all));
     }
 
     #[test]
