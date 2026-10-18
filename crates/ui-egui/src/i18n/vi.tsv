@@ -2621,6 +2621,10 @@
 	Sort by	Sắp xếp theo
 	Then by	Sau đó theo
 	{count} of {total} recipients will be merged.	Sẽ phối {count} trên {total} người nhận.
+	Find in list:	Tìm trong danh sách:
+	Any field	Trường bất kỳ
+	Matches: {count}	Kết quả khớp: {count}
+	Show only records that will be merged	Chỉ hiện các bản ghi sẽ được phối
 
 # Backstage › Recover (#586)
 	Recover	Khôi phục
@@ -2707,3 +2711,22 @@ template	Letter	Thư
 	{added}; {count} couldn't be read: {names}	{added}; không đọc được {count}: {names}
 	{names} and {n} more	{names} và {n} tệp nữa
 	{added}; {n} skipped (limit {max})	{added}; đã bỏ qua {n} (giới hạn {max})
+	nothing is selected	chưa chọn gì
+	select a picture or shape first	hãy chọn một hình ảnh hoặc hình dạng trước
+	select recipients first	hãy chọn người nhận trước
+	select two or more pictures or shapes first (Shift+click)	chọn hai hoặc nhiều hình ảnh hoặc hình dạng (Shift+nhấp)
+	text boxes can't go inside a text box	không thể đặt hộp văn bản vào trong hộp văn bản
+	the cursor isn't in a table	con trỏ không nằm trong bảng
+	{name} options	Tùy chọn của {name}
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	Trong văn bản
+	In margin	Trong lề
+	Drop Cap Options…	Tùy chọn chữ lớn đầu đoạn…
+	Lines to drop:	Số dòng chiếm:
+	Distance from text:	Khoảng cách tới văn bản:
+	Distance from text	Khoảng cách tới văn bản
+
+# Drop Cap disabled reasons (#2601)
+	the paragraph is empty	đoạn văn trống
+	the paragraph starts with a space	đoạn văn bắt đầu bằng dấu cách

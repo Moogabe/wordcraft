@@ -2127,6 +2127,10 @@
 	Contains	Contient
 	Does not contain	Ne contient pas
 	{count} of {total} recipients will be merged.	{count} destinataires sur {total} seront fusionnés.
+	Find in list:	Rechercher dans la liste :
+	Any field	N’importe quel champ
+	Matches: {count}	Correspondances : {count}
+	Show only records that will be merged	Afficher uniquement les enregistrements fusionnés
 	Undo Actions	Annuler plusieurs actions
 	Undo History	Historique des annulations
 	Undo 1 Action	Annuler 1 action
@@ -2680,3 +2684,11 @@
 	✓ None	✓ Aucun
 preview	Title	Titre
 template	Letter	Lettre
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	Dans le texte
+	In margin	Dans la marge
+	Drop Cap Options…	Options de lettrine…
+	Lines to drop:	Hauteur (lignes) :
+	Distance from text:	Distance du texte :
+	Distance from text	Distance du texte

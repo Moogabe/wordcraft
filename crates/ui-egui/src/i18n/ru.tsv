@@ -2524,6 +2524,10 @@ preview	Title	Пример
 	Contains	Содержит
 	Does not contain	Не содержит
 	{count} of {total} recipients will be merged.	Получателей для слияния: {count} из {total}.
+	Find in list:	Найти в списке:
+	Any field	Любое поле
+	Matches: {count}	Совпадений: {count}
+	Show only records that will be merged	Показывать только записи для слияния
 	Take the last match on the page	Брать последнее совпадение на странице
 	Show its list number	Показывать его номер в списке
 	Show its number relative to this field	Показывать его номер относительно этого поля
@@ -2665,3 +2669,22 @@ preview	Title	Пример
 	{added}; {count} couldn't be read: {names}	{added}; не удалось прочитать ({count}): {names}
 	{names} and {n} more	{names} и ещё {n}
 	{added}; {n} skipped (limit {max})	{added}; пропущено: {n} (лимит {max})
+	nothing is selected	ничего не выделено
+	select a picture or shape first	сначала выделите рисунок или фигуру
+	select recipients first	сначала выберите получателей
+	select two or more pictures or shapes first (Shift+click)	выделите два или больше рисунков или фигур (Shift+щелчок)
+	text boxes can't go inside a text box	надпись нельзя поместить внутрь надписи
+	the cursor isn't in a table	курсор не в таблице
+	{name} options	{name}: параметры
+
+# Drop Cap menu and Drop Cap Options (#2601)
+	Dropped	В тексте
+	In margin	На поле
+	Drop Cap Options…	Параметры буквицы…
+	Lines to drop:	Высота в строках:
+	Distance from text:	Расстояние от текста:
+	Distance from text	Расстояние от текста
+
+# Drop Cap disabled reasons (#2601)
+	the paragraph is empty	абзац пуст
+	the paragraph starts with a space	абзац начинается с пробела

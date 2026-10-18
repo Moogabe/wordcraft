@@ -88,9 +88,9 @@ pub struct CanvasState {
     pub scale: f32,
     pub canvas_rect: Option<Rect>,
     pub focused: bool,
-    /// The page's widget id last frame, so a click elsewhere can hand the keyboard straight back to
-    /// it (`WordApp::refocus_after_chrome_click`).
-    pub(crate) widget_id: Option<egui::Id>,
+    /// The page's widget id and the pass that last drew it, so a click elsewhere can hand the
+    /// keyboard straight back to it (`WordApp::refocus_after_chrome_click`).
+    pub(crate) widget_id: Option<(egui::Id, u64)>,
     pub render_ms: f64,
     pub ime_preedit: String,
     /// Document faces added to the interface fonts so the input method's composition (#565) and a
@@ -187,6 +187,18 @@ impl CanvasState {
         self.dragging = false;
         self.column_drag = None;
         self.unit_drag = None;
+    }
+
+    /// The object a drag has taken off its page: which page, and which object. `None` unless an
+    /// object is being **moved** (resizing and turning show the object itself where it is).
+    ///
+    /// A dragged object's page is not laid out again while it is dragged (that would relayout the
+    /// whole document every frame), so the page's raster still shows it where it was — the user
+    /// sees it twice: once in place, once under the pointer. Rendering the page without that one
+    /// object fixes it (see [`wordcraft_layout::display::DisplayOptions::hide_object`]); erasing
+    /// the page would make the other objects blink.
+    fn dragged_off_page(&self) -> Option<(usize, Pos)> {
+        crate::objects::dragged_off_page(self.obj_drag.as_ref())
     }
 
     /// How many pages have a cached rendering.
@@ -707,9 +719,10 @@ pub fn sync_fit_zoom(app: &mut WordApp, scale: f32) {
 }
 
 /// Fingerprint of everything outside the layout that changes how pages render: the view's
-/// marks and markup, dark mode, the page colour and watermark, header/body dimming, the media.
+/// marks and markup, dark mode, the page colour and watermark, header/body dimming, the media,
+/// and (while a drag lasts) the object left out of the page.
 /// Taken once per frame.
-fn view_key(app: &WordApp, dim_body: bool) -> u64 {
+fn view_key(app: &WordApp, dim_body: bool, hidden: Option<&Pos>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     let v = &app.session.view;
     (v.marks, app.session.prefs.marks, v.show_markup, v.dark_mode, wordcraft_render::DARK_PAPER, v.hide_ink, v.draw.replay).hash(&mut h);
@@ -718,6 +731,9 @@ fn view_key(app: &WordApp, dim_body: bool) -> u64 {
     format!("{:?}{:?}{:?}", app.session.doc.settings.page_color, app.session.doc.settings.page_picture, app.session.doc.settings.watermark)
         .hash(&mut h);
     app.session.doc.media.len().hash(&mut h);
+    // A page drawn without a dragged object must not pass for the page with it: the drag starts
+    // and ends change the key once each, so the page is rendered again then and only then.
+    hidden.hash(&mut h);
     h.finish()
 }
 
@@ -736,7 +752,7 @@ fn page_content_key(page: &Page) -> u64 {
                 Placed::Fill { rect, color } => format!("{rect:?}{color:?}").hash(&mut h),
                 Placed::Rule { x0, y0, x1, y1, border } => format!("{x0}{y0}{x1}{y1}{border:?}").hash(&mut h),
                 Placed::Image { rect, media, spin, .. } => format!("{rect:?}{media}{spin:?}").hash(&mut h),
-                Placed::Shape { rect, kind, fill, stroke, stroke_width, effects, freeform, spin, extra } => {
+                Placed::Shape { rect, kind, fill, stroke, stroke_width, effects, freeform, spin, extra, .. } => {
                     format!("{rect:?}{kind:?}{fill:?}{stroke:?}{stroke_width}{effects:?}{spin:?}{extra:?}").hash(&mut h);
                     freeform.as_ref().map(|f| std::sync::Arc::as_ptr(f) as usize).hash(&mut h);
                 }
@@ -1175,7 +1191,10 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
         let t0 = crate::now_ms();
         let mut rects = Vec::with_capacity(geo.rects.len());
         let content_origin = ui.min_rect().min;
-        let view = view_key(app, dim_body);
+        // The object a move has taken off its page: the page is drawn again without it (or it
+        // would be on the page where it was and under the pointer at once).
+        let hidden = app.canvas.dragged_off_page();
+        let view = view_key(app, dim_body, hidden.as_ref().map(|(_, p)| p));
         for (i, pr) in geo.rects.iter().enumerate() {
             let sr = pr.translate(content_origin.to_vec2());
             let Some(page) = layout.pages.get(i) else { continue };
@@ -1194,10 +1213,15 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
             let key =
                 if visible || cached { page_key(app, &layout, i, view, scale_px) ^ if tiled { (tile_height_px as u64) << 32 } else { 0 } } else { 0 };
             let mut fresh = cached && app.canvas.textures.get(&i).is_some_and(|(k, _)| *k == key);
+            // The page a drag took an object off: render it this frame whatever the budget, or the
+            // raster with the object still on it shows for a frame.
+            let forced = hidden.as_ref().is_some_and(|(page, _)| *page == i);
             // Render before placing the page: a page re-rendered in this frame (a zoom step, an
             // edit) then sits on the pixel grid in this frame too, rather than a frame later.
-            if visible && !tiled && !fresh && (rendered < 2 || !app.canvas.textures.contains_key(&i) && rendered < 4) {
-                let opts = page_render_options(app, dim_body);
+            if visible && !tiled && !fresh && (forced || rendered < 2 || !app.canvas.textures.contains_key(&i) && rendered < 4) {
+                let mut opts = page_render_options(app, dim_body);
+                // Only on the page it is on: the `Pos` can't match an object of another page.
+                opts.display.hide_object = hidden.as_ref().filter(|(page, _)| *page == i).map(|(_, p)| p.clone());
                 let img = wordcraft_render::render_page(&app.session.doc, page, scale_px, &opts);
                 let ci = page_image(&img);
                 match app.canvas.textures.get_mut(&i) {
@@ -1251,6 +1275,9 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                     visible_tile_keys.insert(id);
                     let fresh = app.canvas.tiles.get(&id).is_some_and(|(k, _)| *k == key);
                     if !fresh && rendered < 4 {
+                        let mut opts = page_render_options(app, dim_body);
+                        // Only on the page it is on: the `Pos` can't match an object of another page.
+                        opts.display.hide_object = hidden.as_ref().filter(|(page, _)| *page == i).map(|(_, p)| p.clone());
                         // The tiny subtraction avoids a 1px overshoot from round-tripping f32
                         // pixels through page points and render_area's ceil() conversion.
                         let img = wordcraft_render::render_area(
@@ -1261,7 +1288,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
                             page.w,
                             (height_px as f32 - 0.01).max(0.01) / scale_px,
                             scale_px,
-                            &page_render_options(app, dim_body),
+                            &opts,
                         );
                         let ci = page_image(&img);
                         match app.canvas.tiles.get_mut(&id) {
@@ -1589,7 +1616,7 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
     if focus_click || app.canvas.want_focus {
         app.canvas.want_focus = false;
     }
-    app.canvas.widget_id = Some(resp.id);
+    app.canvas.widget_id = Some((resp.id, ui.ctx().cumulative_pass_nr()));
     if resp.has_focus() {
         ui.memory_mut(|m| {
             m.set_focus_lock_filter(resp.id, egui::EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true })
@@ -3121,6 +3148,10 @@ fn context_menu(app: &mut WordApp, ui: &mut Ui) {
         item(ui, app, "Reset Picture", "picture.reset", json!({}));
         item(ui, app, "Size and Crop…", "ui.tab", json!({"tab": "Picture Format"}));
     }
+    if picture || object {
+        // A numbered caption under (or over) the picture, shape, text box or chart (#1230).
+        item(ui, app, "Insert Caption…", "references.caption", json!({}));
+    }
     if object {
         ui.menu_button(tl!("Wrap Text"), |ui| crate::ribbon::wrap_text_items(ui, app));
     }
@@ -3553,7 +3584,7 @@ mod tests {
         let at = |a: &mut WordApp, off: usize| {
             let layout = a.session.layout();
             let c = layout.caret_on(&Pos::body(0, off), 0).unwrap();
-            let view = view_key(a, false);
+            let view = view_key(a, false, None);
             caret_color_at(a, &layout, c.page, c.x, c.top + c.height / 2.0, view, false)
         };
         assert_eq!(at(&mut a, 2), Color32::BLACK, "white paper");
@@ -4827,6 +4858,46 @@ mod tests {
         assert!(h.state().session.doc.body.iter().all(|b| b.as_table().is_none()));
     }
 
+    /// #1230: right-clicking a picture offers Insert Caption…, as in Word. For a picture in a
+    /// table cell the dialog proposes a Figure caption (not Table), and the caption goes under
+    /// the picture in that cell.
+    #[test]
+    fn right_click_on_a_picture_offers_insert_caption() {
+        let mut h = table_window();
+        h.state_mut().run("caret.end", json!({})).unwrap();
+        let mut png = Vec::new();
+        let img = image::RgbaImage::from_pixel(40, 20, image::Rgba([30, 90, 200, 255]));
+        image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        h.state_mut().run("insert.picture", json!({"data": wordcraft_engine::cmd::insert::base64_encode(&png), "width": 60})).unwrap();
+        let pos = wordcraft_engine::cmd::objects::selected(&h.state().session).unwrap().0;
+        h.state_mut().session.sel = wordcraft_engine::Selection::caret(Pos::body(1, 0));
+        steps(&mut h, 4);
+        let rect = h.state_mut().session.layout().object(&pos, 0).expect("the picture is laid out").rect;
+        let at = crate::frame::to_screen(h.state().canvas.page_rects[0], h.state().canvas.scale, rect).center();
+        right_click(&mut h, at);
+        assert!(wordcraft_engine::cmd::objects::object_selection(&h.state().session).is_some(), "the right-click selected the picture");
+        assert_menu(&h, &["Insert Caption…", "Wrap Text"], true);
+        pick(&mut h, &["Insert Caption…"]);
+        let form = match &h.state().dialog {
+            Some(crate::dialogs::Dialog::Refs(d)) => match &**d {
+                crate::dialogs_refs::RefsDialog::Caption(f) => f.clone(),
+                d => panic!("not the caption dialog: {d:?}"),
+            },
+            d => panic!("no caption dialog: {d:?}"),
+        };
+        assert_eq!(form.label, "Figure", "a picture in a table gets a figure caption");
+        h.state_mut().dialog = None;
+        h.state_mut().run("references.caption", form.params()).unwrap();
+        let (table, r, c) = pos.path.cell().unwrap();
+        let cell: Vec<String> = h.state().session.doc.table(StoryRef::Body, &table).unwrap().rows[r].cells[c]
+            .blocks
+            .iter()
+            .filter_map(|b| b.as_para())
+            .map(|p| p.plain_text())
+            .collect();
+        assert_eq!(cell.last().map(String::as_str), Some("Figure 1"), "{cell:?}");
+    }
+
     /// With just the caret in a cell, right-click › Delete › Delete Table removes the table, in
     /// one undo step (#1198: the menu offered only Delete Cells there).
     #[test]
@@ -5697,5 +5768,19 @@ mod tests {
 
     fn page_at_index(rects: &[Rect], p: Pos2) -> Option<usize> {
         nearest_page(rects, p)
+    }
+
+    /// A page drawn without a dragged object must not pass for the page with it: the drag's start
+    /// and end change the page's texture key once each, so the page is rendered again then and
+    /// only then. Without this, the old raster — the object still on it where it was — stays while
+    /// the preview follows the pointer, and the object shows twice.
+    #[test]
+    fn the_view_key_changes_when_a_drag_takes_an_object_off_the_page() {
+        let doc = wordcraft_doc::Document::from_text("Hello WordCraft");
+        let app = WordApp::new(wordcraft_engine::Session::new(doc), Default::default());
+        let object = Pos::body(0, 5);
+        let hidden = view_key(&app, false, Some(&object));
+        assert_ne!(hidden, view_key(&app, false, None), "the page without the dragged object is rendered again");
+        assert_eq!(hidden, view_key(&app, false, Some(&object)), "the same drag keeps the key: no re-render every frame");
     }
 }

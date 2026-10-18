@@ -178,7 +178,8 @@ fn clean_text(s: &str) -> String {
 
 fn children_of_choice(ac: &El) -> Option<&El> {
     // Prefer a Choice whose requirements we understand; else the Fallback; else any Choice.
-    const KNOWN: &[&str] = &["wps", "wpg", "wpc", "wpi", "w14", "w15", "wp14", "a14", "w16se", "w16cid", "w16", "w16cex", "w16sdtdh", "v"];
+    // `m`: Office Math (a producer may guard an equation with a picture fallback, #1273).
+    const KNOWN: &[&str] = &["wps", "wpg", "wpc", "wpi", "w14", "w15", "wp14", "a14", "w16se", "w16cid", "w16", "w16cex", "w16sdtdh", "v", "m"];
     let ok = |c: &El| c.attr("Requires").unwrap_or("").split_whitespace().all(|r| KNOWN.contains(&r));
     ac.children("mc:Choice").find(|c| ok(c)).or_else(|| ac.child("mc:Fallback")).or_else(|| ac.child("mc:Choice"))
 }
@@ -201,10 +202,21 @@ impl Reader<'_> {
                         && p.props.drop_cap.is_none()
                         && let Some(Block::Para(mut first)) = out.pop().map(|b| (*b).clone())
                     {
-                        let lines = first.props.drop_cap;
                         let mut props = p.props.clone();
+                        props.drop_cap = first.props.drop_cap;
+                        props.drop_cap_margin = first.props.drop_cap_margin;
+                        props.drop_cap_distance = first.props.drop_cap_distance;
+                        // A letter in a font of its own: the drop cap's font, the letter itself
+                        // in the text's (so taking the drop cap away gives the letter its font back).
+                        let cap_font = first.runs.first().and_then(|r| r.props.font.clone());
+                        let text_font = p.runs.first().and_then(|r| r.props.font.clone());
+                        if cap_font.is_some() && cap_font != text_font {
+                            for r in &mut first.runs {
+                                r.props.font = text_font.clone();
+                            }
+                            props.drop_cap_font = cap_font;
+                        }
                         first.append(p);
-                        props.drop_cap = lines;
                         first.props = props;
                         out.push(para_block(first));
                         continue;
@@ -220,6 +232,13 @@ impl Reader<'_> {
                 }
                 "w:sdt" => self.read_block_sdt(sc, e, rels, out, depth),
                 "w:customXml" | "w:smartTag" | "w:ins" | "w:moveTo" => self.read_blocks(sc, e, rels, out, depth + 1),
+                // Math is allowed straight in a story (EG_BlockLevelElts takes EG_RunLevelElements,
+                // which takes EG_MathContent): it gets a paragraph of its own (#1273).
+                "m:oMathPara" | "m:oMath" => {
+                    let wrapped = El { name: "w:p".into(), attrs: Vec::new(), kids: vec![Node::El(e.clone())] };
+                    let p = self.read_para(sc, &wrapped, rels, depth);
+                    out.push(para_block(p));
+                }
                 "mc:AlternateContent" => {
                     if let Some(c) = children_of_choice(e) {
                         self.read_blocks(sc, c, rels, out, depth + 1);

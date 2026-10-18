@@ -140,8 +140,13 @@ Imported Word 97–2003 `.doc`/`.dot` files now ask for a supported DOCX target 
 
 | Date | What landed |
 | 2026-10-16 | Romanian proofing: text marked Romanian (Review › Language › Romanian, or `ro-RO` in a .docx) is spell-checked against the `ro_RO` Hunspell dictionary installed on the system (LibreOffice's rospell works; not bundled), with suggestions that add missing diacritics first (`stiinta` → `știință`, `cîine` → `câine`, `intrun` → `într-un`) and Romanian grammar checks (`nici un` → `niciun`, a comma before `ci`/`dar`). Cedilla `ş`/`ţ` count as `ș`/`ț`. No Romanian hyphenation yet |
+| 2026-10-17 | Edit Recipient List finds records (#1576): a Find in list box hides rows with no cell containing the text (any case) and counts the matches, and "Show only records that will be merged" hides the rows the filter leaves out; both only change the view. Rows are striped, and edits and removes go to the right record however the grid is narrowed |
+| 2026-10-14 | DOCX row table border exceptions render and survive saving. Explicit cell borders win; a row exception does not change other rows. |
+| 2026-10-14 | Tab stops edited on the ruler: the corner selector picks Left/Center/Right/Decimal/Bar, a click sets a stop (Alt skips the snap), dragging moves it with a guide line and position tooltip, dragging off the ruler clears it; markers draw per kind and mirror for RTL; one `para.tabs` call and one undo step per gesture |
+| 2026-10-12 | Fields keep `w:dirty` through DOCX saves (#877): a begin marker flagged by a generator that couldn't compute a result (pandoc-style TOC placeholders) keeps the flag on open/save — as a buffered field or a range field — so Word still refreshes it on open; computing a result (Update Field, Update Table) clears it, like Word's F9 |
 | 2026-10-18 | Symbols keep their font (#2036): a `w:sym` or Insert › Symbol character in Wingdings, Symbol or Webdings remembers its symbol font apart from the text's font, so selecting all and changing the font (or Clear Formatting) no longer turns the symbols into boxes; saved back to DOCX as `w:sym`, so Word shows them too. Typed text and the Format Painter don't pick up the symbol font. |
 | 2026-10-16 | `wordcraft-cli run --script FILE.json` (`-` for stdin) runs a JSON list of commands, then saves to one or more outputs (docx and pdf in one run); errors name the command number and id and nothing is saved, #1963 |
+| 2026-10-17 | Restrict Editing holds for structure too (#1327): an exception inside a table cell no longer lets table, row or cell formatting change the protected rest of the table; formatting limited to styles refuses Paste Formatting, table shading, borders, cell alignment, cell margins, text direction, table-style edits and locked table styles; loading, filtering or sorting recipients no longer rewrites merge-field results in a protected document. |
 | 2026-10-14 | RTF export writes every section (gap 19): `\sect` ends each section and `\sectd` carries its break type, page size and orientation, margins, columns, page numbering and title page, so multi-section documents survive an RTF round trip |
 | 2026-10-14 | `ASK` and `SET` fields no longer show their stored result on the page or in PDFs (#1765): like Word, they only assign text to a bookmark and draw nothing; the stored result is kept and saved |
 | 2026-10-15 | Table rows with an at-least height start the next page whole when less than their minimum is left on a page that already holds something, so one-row-per-page booklets keep their pages; rows taller than a page split from the top of the next page and repeated header rows go with the row (#1742) |
@@ -178,6 +183,14 @@ Imported Word 97–2003 `.doc`/`.dot` files now ask for a supported DOCX target 
 | 2026-10-15 | Text Highlight Color: No Color becomes the Highlight button's choice, as in Word, so the next click on the button removes highlighting instead of applying the colour picked before; the ribbon and the mini toolbar share one menu (#2105) |
 | 2026-10-16 | Footnote and endnote editing keeps the body and active note text at normal opacity (#2545), without changing document colours or print/PDF output. |
 | 2026-10-16 | A picture watermark in a header that starts with a table is drawn centred on the page behind the body text, on every page, instead of in the header's cell at the top of the page (#1775); `layoutInCell="0"` and VML `o:allowincell="f"` survive save and reopen |
+| 2026-10-17 | Ribbon hover hints: a disabled control says why (the command's own reason), split-button arrows, menu buttons and the font, size and outline boxes have hints, and hints show on keyboard focus (#1086). |
+| 2026-10-17 | Insert › Drop Cap is a menu (None, Dropped, In margin, Drop Cap Options…); the dialog sets position, font, lines to drop and distance; letters in the margin; DOCX keeps them (#2601). |
+| 2026-10-16 | An otherwise empty section starting a new page retains its paragraph line before a continuous section, matching an original native Word control. |
+| 2026-10-16 | Equations from Word files keep all their content (#1273): math straight in the body or a table cell, math behind `mc:AlternateContent Requires="m"`, runs inside hyperlinks, simple fields and markup-compatibility blocks within an equation, and `w:sym`/Symbol-font characters in math; operators, delimiters and accents the math font lacks come from a fallback font. Every ECMA-376 §22.1 element is pinned by a coverage test. |
+| 2026-10-16 | Captions and title pages (#1230): Insert Caption… on the right-click menu of pictures, shapes, text boxes and charts, the caption going under (or over) the object in its own cell or text box; Page Setup's Different First Page and Different Odd & Even Pages check boxes, so a title page can go without its page number |
+| 2026-10-17 | SECTIONPAGES includes shared continuous-section pages. A native original control confirms a section starting on page 1 and continuing on page 2 reports 2. |
+| 2026-10-17 | File › Print's Scale to paper size (#2108): pick Letter, Legal, A4 or any Layout › Size paper and every page is scaled to it and centred, the paper turned to each page's orientation, in the preview, the print job (with the spooler's media) and Save these pages as PDF; the document keeps its page size. `paper` param on `ui.print`/`file.printPdf` |
+| 2026-10-17 | Non-overlapping body floating tables clear header tables. Original native controls distinguish never-overlap from allowed overlap. |
 |---|---|
 | 2026-10-16 | Save Changes gives assistive technology a named alert dialog with the loss warning and any save failure; visual layout and save policy unchanged (#1015). Native screen-reader verification remains pending. |
 | 2026-10-15 | The font family caches are bounded (4096 families for text, 1024 for math, names over 256 bytes aren't remembered), so a document naming thousands of missing fonts can't grow memory; equation fonts are looked up again after a font is added or removed instead of keeping the old choice (#1354) |
@@ -479,11 +492,15 @@ Imported Word 97–2003 `.doc`/`.dot` files now ask for a supported DOCX target 
 | 2026-10-15 | The web app keeps its preferences between visits (#2132): theme (dark mode), interface size, editing options and the rest of what the desktop app saves in `ui.json` are kept in the browser's `localStorage`, written as soon as they change |
 | 2026-10-17 | Saving into a folder that refuses a temporary file (macOS privacy protection, read-only folders, #2138) never overwrites an existing document in place: it is left untouched and the error says to use Save As to another folder or allow WordCraft access to the folder (System Settings › Privacy & Security › Files and Folders on macOS). A new file is created directly. Unit tests on Linux; not yet confirmed on a Mac |
 
+Footer page-table height and body wrapping are corrected. Other pagination gaps remain open.
+
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-17 | trivial | Progress log: recipient list search and merged-only view (#1576) |
 | 2026-10-18 | trivial | Progress log: symbols keep their font when the text font changes (#2036) |
+| 2026-10-17 | trivial | Progress log: Restrict Editing guards tables, Paste Formatting and merge fields (#1327) |
 | 2026-10-14 | trivial | Progress log: a list item's first word is not flagged for a missing capital (#1741) |
 | 2026-10-18 | trivial | #2445: pending Save As answers keep their originating document identity, so a replacement document is never written to an old picker destination; real Save-button and focused-editor shortcut controls verified |
 | 2026-10-16 | trivial | #2445: interactive Save on import-only .doc/.dot paths uses the existing DOCX Save As flow; cancel and failed writes keep the draft, and Close waits for a successful save. Explicit/script saves still report unsupported legacy output |
@@ -541,6 +558,14 @@ Imported Word 97–2003 `.doc`/`.dot` files now ask for a supported DOCX target 
 | 2026-10-15 | trivial | Progress log: the word being typed gets no squiggle until the caret leaves it (#1552) |
 | 2026-10-15 | trivial | Progress log: Highlight No Color sticks to the button (#2105) |
 | 2026-10-16 | trivial | Body and active note text keep normal opacity while editing footnotes or endnotes (#2545); header/footer dimming is unchanged |
+| 2026-10-17 | minor | Progress log: Drop Cap Options (#2601) |
+| 2026-10-16 | trivial | An otherwise empty section at page start retains its line before continuous content; later closing marks stay quiet |
+| 2026-10-16 | trivial | Progress log: equations from Word files keep their content (#1273) |
+| 2026-10-16 | trivial | Progress log: Insert Caption… on objects and Page Setup header and footer options (#1230) |
+| 2026-10-17 | trivial | SECTIONPAGES includes shared continuous-section pages in body and header/footer fields |
+| 2026-10-17 | trivial | Footer page tables no longer inflate footer text height; body lines wrap at their physical bounds |
+| 2026-10-17 | minor | Progress log: Scale to paper size on File › Print, #2108 |
+| 2026-10-17 | trivial | Non-overlapping body floating tables clear header tables; overlapping tables keep their requested position |
 | 2026-10-14 | trivial | Progress log: row table border exceptions |
 | 2026-10-12 | minor | Czech proofing review: short-word splits rank after deletion, NOSUGGEST excludes suggestions while accepting typed forms, affix comments apply only to headers, ratios keep spaces and repeated-word messages use Czech quotes; synthetic engine end-to-end and latency checks |
 | 2026-10-12 | minor | Czech spelling from the installed Hunspell dictionary, runtime-table suggestions and generic checks; Czech interface writes cs-CZ documents; no Czech hyphenation patterns bundled; estimates unchanged |

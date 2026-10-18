@@ -47,10 +47,10 @@ Exact line spacing keeps the run font baseline around tall equations; automatic 
 | Widow/orphan control, keep with next, keep lines together, page break before | ✅ | `lib.rs` keep_next/keep_lines; a line holding only a page break stays at the bottom of a full page instead of leaving a blank page (#534); a paragraph ending with a page break keeps its space after on the old page, so the next page starts at the top (compatibility modes 12 to 15, `layout::tests::space_before_at_the_top_of_a_page_like_word`); a three-line paragraph with room for two moves whole (neither a widow nor an orphan is allowed), as in Word | — |
 | Tabs (left, center, right, decimal, bar), leaders | 🟡 | Bar tabs untested. Positional tabs (`w:ptab`, ECMA-376 §17.3.3.23) go to the left edge, centre or right edge of the margins or indents whatever the tab stops, and to the next line when the text has passed that place (#2367, `layout::tests::right_positional_tab_ends_text_on_the_right_margin` and the three after it); not compared with Word on lines narrowed by floating objects or right-to-left paragraphs | 1–2 |
 | Hyphenation (automatic, zone from the document, words in capitals, soft hyphens, consecutive limit, Manual Hyphenation, #407) | 🟡 | English patterns only; other languages hyphenate wrongly or not at all | in localization |
-| Drop caps | ✅ | 2026-10-06 | — |
+| Drop caps (dropped and in margin, lines, distance, font; `w:framePr w:dropCap`) | ✅ | 2026-10-17 | — |
 | All Caps and Small Caps: the full capital of each letter, so ß draws as SS (ﬀ as FF); the capitals drawn for one character are one cluster, so the caret, selection, hit testing and line breaking treat ß as one character | ✅ | `layout::tests::caps_draw_sharp_s_as_two_capitals_in_one_cluster` (#1581). The PDF text layer still reads the document's lowercase letters until #1473 | — |
 | Columns, column breaks, separators, balancing | ✅ | Columns balance on a section's last page when the next section starts continuous (also at the document end, which Word only balances when the document ends with a continuous break); not after next-page/even/odd breaks or on a page with a column break; keep-together, keep-with-next, widow/orphan control and unsplittable rows can leave them slightly uneven (#350) | — |
-| Section breaks (next page, continuous, even, odd), different first page, odd/even headers | ✅ | Section breaks don't show in Draft view (#42). A break inserted with text selected goes before the selection and keeps it, as in Word (#852) | 1–2 |
+| Section breaks (next page, continuous, even, odd), different first page, odd/even headers | ✅ | Section breaks don't show in Draft view (#42). A break inserted with text selected goes before the selection and keeps it, as in Word (#852). An otherwise empty section at page start retains its line (`empty_page_section_keeps_line`); a closing mark after text stays quiet. | 1–2 |
 | Labels on page-break-only list paragraphs | ✅ | `layout::tests::break_only_list_has_no_label`: no bullet or number on the break, but the next number is still 3 after item 1 and a break. Plain empty items keep their labels. Synthetic DOCX observed through Adobe PDF conversion | — |
 | List labels: number formats (decimal, letters, Russian letters, roman, ordinal text, Chinese/Japanese/Korean counting and legal, 一〇一 digits, 甲乙丙, ①…⑳, full-width), `%n` text such as `第%1章` / `（%1）`, legal numbering | ✅ | `doc::cjk_numbers` tests, `doc::section::tests::russian_letters_follow_word`, `layout::tests::chinese_counting_list_labels_and_their_font_runs`, `layout::tests::russian_letter_list_labels_draw_cyrillic`; a label mixing faces (digit + CJK comma) is drawn run by run (#534); Russian letters skip ё, й, ъ and ь and then double (аа, бб), as observed in Word. Hebrew, Arabic, Hindi, Thai and Vietnamese formats show decimal The label stays attached to the start of the text when the paragraph is centred or aligned to the end, as in Word (#1159). | — |
 | Body top below a tall header, footer pushes body up | ✅ | #138; a footer taller than the bottom margin moves the body bottom up (#453), and a header or footer linked to the previous section takes its room too (#454) | — |
@@ -74,12 +74,12 @@ Exact line spacing keeps the run font baseline around tall equations; automatic 
 | Ruby / phonetic guide, enclose characters, combined characters | 🟡 | ruby (Phonetic Guide) landed (#288): ruby text over its base by alignment, line grows to fit, in PDF; enclose and combined characters missing; ruby not yet compared with Word page by page | 2–4 |
 | Automatic space between Asian text and Latin text or digits (`w:autoSpaceDE`, `w:autoSpaceDN`) | 🟡 | #2358: a quarter of the Asian character's font size after the first of two touching characters, across runs (measured on Word's PDF of a Chinese document at 16 pt, as JIS X 4051 asks); not beside East Asian punctuation, Hangul, Latin punctuation or an existing space; a field is classed by the text it shows; none at a line's end, none on a character grid the paragraph snaps to (`layout::tests_autospace`). Not yet: justification widening the space as Word does, `autoSpaceLikeWord95` | 1–2 |
 | Bidirectional paragraphs, mixed-direction lines; RTL tables and sections | 🟡 | #207; RTL tables (#362): grid columns from the right edge, start alignment and indent from the right margin, cell margins and left/right borders mirrored, merged and turned cells and nested tables included; RTL sections (#362): newspaper columns right to left with the line between mirrored. Right-hand page gutter (`w:rtlGutter`) missing | 1 |
-| Equations: display layout, numbering, wrapping long display equations | ✅ | #191; long display equations break at top-level operators (`m:brkBin`, `m:brkBinSub`), manual breaks and `m:alnAt`, continuation lines indented by `m:wrapIndent` or set right (`m:wrapRight`) (#326) | — |
+| Equations: display layout, numbering, wrapping long display equations | ✅ | #191; long display equations break at top-level operators (`m:brkBin`, `m:brkBinSub`), manual breaks and `m:alnAt`, continuation lines indented by `m:wrapIndent` or set right (`m:wrapRight`) (#326); an n-ary operator, delimiter, accent or group character the math font lacks is drawn from a fallback font instead of a missing-glyph box (#1273) | — |
 | Hidden text excluded from breaking and hyphenation | ✅ | #173 | — |
-| Fields: PAGE, NUMPAGES, SECTIONPAGES, TOC page numbers | ✅ | #52; totals in the body need a second pass once the page count is known (#451) | — |
+| Fields: PAGE, NUMPAGES, SECTIONPAGES, TOC page numbers | ✅ | #52; totals in the body need a second pass once the page count is known (#451); SECTIONPAGES includes shared continuous-section start pages | — |
 | Compatibility modes (Word 2003/2007/2010 layout for old files: `w:compat` options) | 🟡 | `allowSpaceOfSameStyleInTable` supported in modes 11/12/14; mode 15 retains contextual suppression. Most other legacy compat options remain ignored | 10–20 |
 | Fields: STYLEREF in headers and footers (running chapter titles) | ✅ | Evaluated per page at layout time: the page's first (or with `\l` last) paragraph of the style, else the nearest before it; style name, id or heading level (a level finds the style named `heading N` whatever its id, so localized documents match, #1286); character styles; `\n \r \w \s \t \p` (`\r` treated as `\w`); body STYLEREF updated with the other fields (#775). Field results with right-to-left text (a Hebrew heading, "פרק א") are laid out with bidi reordering like ordinary text: the result is an isolate taking its first strong letter's direction (else the text's around the field), and each level run is shaped and mirrored in its own direction, so `{ PAGE }` in field-code view and `(Chapter 1)` keep their brackets in right-to-left paragraphs; this covers every field and note mark shown as text (#1670). Header paragraphs are cached on their per-page results, so typing in body text no STYLEREF shows doesn't lay the headers out again (#1286) | — |
-| Fields: PAGE, NUMPAGES, SECTIONPAGES, TOC page numbers, PAGEREF in headers and footers | ✅ | #52; totals in the body need a second pass once the page count is known (#451); a PAGE field in a paragraph that runs onto a later page (a page break inside it, or a natural split) shows that page's number, the rest of the paragraph broken again for the wider result (#1352); PAGEREF in headers and footers shows its bookmark's page, filled in after pagination like their totals (#1477); in the body it keeps its result until fields are updated | — |
+| Fields: PAGE, NUMPAGES, SECTIONPAGES, TOC page numbers, PAGEREF in headers and footers | ✅ | #52; totals in the body need a second pass once the page count is known (#451); SECTIONPAGES includes shared continuous-section start pages; a PAGE field in a paragraph that runs onto a later page (a page break inside it, or a natural split) shows that page's number, the rest of the paragraph broken again for the wider result (#1352); PAGEREF in headers and footers shows its bookmark's page, filled in after pagination like their totals (#1477); in the body it keeps its result until fields are updated | — |
 | Page-by-page comparison harness against Word | ❌ | Run Word locally on our own synthetic documents, export PDF, compare line breaks; Word output stays under `plan/` (never committed) | 8–12 |
 
 ## Missing black-circle glyphs
@@ -94,6 +94,12 @@ Other missing characters and paragraph wrapping are outside this change.
 An original embedded-font control matches native Word inline fallback to Times while preserving
 a covered primary glyph. A tall present-glyph label retains a 19.628 pt pitch (Word mean 19.632 pt).
 The combined numbering-definition blocks are not used to infer their individual font choices.
+
+## Floating tables across header and body
+
+A body floating table with `tblOverlap=never` clears floating header tables.
+Allowed overlap retains its requested position. Original native controls confirm
+both cases. Earlier-body reflow around late tables remains separate.
 
 ## List-label line spacing
 
@@ -198,6 +204,10 @@ Explicit cell page breaks (Word for Mac 16.113.2, compatibility modes 14 and 15)
 
 Footer flow-table strokes reserve their drawn top edge, including the half-width above the cell box. Original Word for Mac 16.113.2 mode-15 controls confirm the three footer cases move to the next page. The 3 pt row-end border case without a footer still differs. Tight row-end and continuation border fitting remain separate.
 
+## Footer page tables
+
+Page-relative footer tables keep their physical wrap bounds without adding to footer text height. Body text resumes below the table. Original native controls cover empty, text-bearing and minimum-height tables. Body textbox boundaries and nested footer painting remain separate gaps.
+
 ## Revision history
 
 | Date | Change | Summary |
@@ -231,6 +241,12 @@ Footer flow-table strokes reserve their drawn top edge, including the half-width
 | 2026-10-16 | trivial | Subpoint grid units retain their declared widths without shrinking adjacent cells; tiny totals normalize without scale-factor overflow |
 | 2026-10-18 | trivial | Any VML float in a header or footer cell is placed on the page, as Word for Mac does (user-checked, #1775) |
 | 2026-10-16 | trivial | A header or footer cell's float placed relative to the page and not laid out in its cell (a picture watermark in a header that starts with a table) is placed on the page, behind the text (#1775) |
+| 2026-10-17 | minor | Drop caps: In margin (letter in the left margin, text not indented), distance from text and the letter's font, round-tripped as `w:framePr` (#2601) |
+| 2026-10-16 | trivial | An otherwise empty section at page start retains its line before continuous content; later closing marks stay quiet |
+| 2026-10-16 | trivial | Math operators, delimiters and accents missing from the math font use a fallback font (#1273) |
+| 2026-10-17 | trivial | SECTIONPAGES includes shared continuous-section pages in body and header/footer fields |
+| 2026-10-17 | trivial | Footer page tables preserve text height and wrap intersecting body lines |
+| 2026-10-17 | trivial | Non-overlapping body floating tables clear header tables; overlapping tables keep their requested position |
 | 2026-10-14 | trivial | Row table border exceptions draw without leaking into other rows |
 | 2026-10-14 | trivial | Consistent cell widths override a stale table grid |
 | 2026-10-14 | trivial | Paragraphs inside complex-field instructions take no flow height; empty result paragraphs keep their line. |
