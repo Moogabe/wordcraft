@@ -155,5 +155,8 @@ sync_github_name = true
 real_name = "Antoine Boxho"
 sync_github_name = true
 
+[people.matteo-andreuzza]
+sync_github_name = true
+
 [people.moogabe]
 display_name = "Jan de la Alderaan"

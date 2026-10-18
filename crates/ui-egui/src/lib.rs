@@ -71,6 +71,7 @@ pub mod print_page;
 pub mod printing;
 pub mod read_aloud;
 pub mod ribbon;
+pub mod ribbon_fit;
 pub mod ruler_tabs;
 pub mod scroll;
 pub mod system_clipboard;
@@ -2496,6 +2497,8 @@ fn input_dialog(id: &str, params: &Value) -> Option<&'static str> {
         "table.properties" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableProperties"),
         // Cell Margins without settings shows the dialog; values continue through the same command.
         "table.cellMargins" if params.as_object().is_none_or(|m| m.is_empty()) => Some("tableCellMargins"),
+        // Size without a size (Picture Format › Size's launcher) shows the Size dialog (#2573).
+        "picture.size" if params.as_object().is_none_or(|m| m.is_empty()) => Some("pictureSize"),
         // Formula without one asks for it, suggested from the numbers next to the cell (#1201).
         "table.formula" if !has("formula") => Some("tableFormula"),
         // Sort without settings asks for the column, order and header row (#1200).
@@ -7263,10 +7266,12 @@ mod tests {
         )
         .unwrap();
         a.run("mailings.editRecipients", json!({})).unwrap();
-        let Some(dialogs::Dialog::RecipientList { rows, filter, .. }) = &a.dialog else { panic!() };
+        let Some(dialogs::Dialog::RecipientList { rows, filter, fields, .. }) = &a.dialog else { panic!() };
         assert_eq!(rows.len(), 3, "every record, not only the filtered ones");
         assert!(filter.open);
-        let params = filter.params();
+        let params = filter.params(fields);
+        // A rule or sort key on a field renamed or removed in the table drops (#1287).
+        assert_eq!(filter.params(&["Name".to_string()]), json!({"rules": [], "sort": [{"field": "Name", "descending": true}]}));
         assert_eq!(params["rules"], json!([{"field": "City", "op": "equal", "value": "London", "join": "and"}]));
         assert_eq!(params["sort"], json!([{"field": "Name", "descending": true}]));
         // Applying the dialog's filter to a reloaded list gives the same records.
@@ -7324,7 +7329,7 @@ mod tests {
         let mut viewed = filter.clone();
         viewed.find = "grace".into();
         viewed.only_merged = true;
-        assert_eq!(viewed.params(), filter.params());
+        assert_eq!(viewed.params(&fields), filter.params(&fields));
     }
 
     /// #1576 review: while a cell is edited the grid keeps its rows, so a record the edit stops
