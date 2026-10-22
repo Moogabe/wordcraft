@@ -52,6 +52,10 @@ pub enum ProofLang {
     /// Romanian (`ro`, `ro-RO`, `ro-MD`): the installed Hunspell dictionary (`ro_RO`, when there
     /// is one) and the Romanian grammar rules. Hyphenation keeps the fallback English patterns.
     Ro,
+    /// German (`de`, `de-DE`, `de-AT`, `de-CH`…): hyphenation by the German patterns (reformed
+    /// spelling). There is no German dictionary or grammar yet, so, as for [`ProofLang::Other`],
+    /// no spelling or grammar marks.
+    De,
     /// A language without proofing tools here (`fr-FR`, `ja-JP`, `x-none`…). Like Word without
     /// the language's proofing tools: no spelling or grammar marks, so its words are never
     /// flagged as English misspellings. Hyphenation keeps using the English patterns, as before
@@ -105,6 +109,8 @@ impl ProofLang {
         } else if ["ro", "ron", "rum", "mo", "mol"].iter().any(|p| primary.eq_ignore_ascii_case(p)) {
             // `mo`/`mol` are the withdrawn Moldovan tags, Romanian since 2008.
             ProofLang::Ro
+        } else if ["de", "deu", "ger"].iter().any(|c| primary.eq_ignore_ascii_case(c)) {
+            ProofLang::De
         } else {
             ProofLang::Other
         }
@@ -134,7 +140,7 @@ impl ProofLang {
         matches!(self, ProofLang::En | ProofLang::EnGb | ProofLang::EnCa)
     }
 
-    /// The primary language subtag (`en`, `pl`, `bg`, `tr`, `ru`, `cs`, `id`, `ro`); empty for [`ProofLang::Other`].
+    /// The primary language subtag (`en`, `pl`, `bg`, `tr`, `ru`, `cs`, `id`, `ro`, `de`); empty for [`ProofLang::Other`].
     pub fn code(self) -> &'static str {
         match self {
             ProofLang::En | ProofLang::EnGb | ProofLang::EnCa => "en",
@@ -148,6 +154,7 @@ impl ProofLang {
             ProofLang::Cs => "cs",
             ProofLang::Id => "id",
             ProofLang::Ro => "ro",
+            ProofLang::De => "de",
             ProofLang::Other => "",
         }
     }
@@ -288,7 +295,11 @@ mod tests {
         for t in ["tr", "tr-TR", "tr-CY", "TR_tr", "tur"] {
             assert_eq!(ProofLang::from_tag(Some(t)), ProofLang::Tr, "{t}");
         }
-        for t in ["fr-FR", "de", "x-none", "ja-JP", "plx", "bgx", "trx", "csx", "idx", "inx", "e", "-"] {
+        for t in ["de", "de-DE", "de-CH", "DE_at", "deu", "ger"] {
+            assert_eq!(ProofLang::from_tag(Some(t)), ProofLang::De, "{t}");
+        }
+        assert!(!ProofLang::De.is_proofed());
+        for t in ["fr-FR", "dex", "x-none", "ja-JP", "plx", "bgx", "trx", "csx", "idx", "inx", "e", "-"] {
             assert_eq!(ProofLang::from_tag(Some(t)), ProofLang::Other, "{t}");
         }
         assert_eq!(ProofLang::from_tag(None), ProofLang::En);
