@@ -111,7 +111,12 @@ fn ends_sentence(gap: &str, prev: &str) -> bool {
     if end == '.' && abbreviation_or_number(prev) {
         return false;
     }
-    let rest = t.trim_start_matches(['.', '!', '?']).trim_start_matches(['"', '”', '’', '\'', ')', '»', ']']);
+    let after = t.trim_start_matches(['.', '!', '?']);
+    // A quotation that ends in its own `?` or `!` goes on in lower case: „Vii?” a întrebat.
+    if matches!(end, '?' | '!') && after.starts_with(['"', '”', '’', '»']) {
+        return false;
+    }
+    let rest = after.trim_start_matches(['"', '”', '’', '\'', ')', '»', ']']);
     rest.starts_with(char::is_whitespace) && rest.trim_start().chars().all(|c| matches!(c, '"' | '„' | '“' | '«' | '(' | '[' | '\'' | '—' | '–'))
 }
 
@@ -310,6 +315,11 @@ mod tests {
         assert_eq!(&"Salut. apoi am plecat."[v[0].start..v[0].end], "apoi");
         // After a quotation mark or bracket too; never after an abbreviation or an ellipsis.
         assert_eq!(messages("A venit.” apoi a plecat."), ["Majusculă la început de propoziție"]);
+        // A quotation ending in its own `?` or `!` goes on in lower case; a full stop inside the
+        // quotation still ends the sentence.
+        for t in ["„Vii?” a întrebat.", "„Stai!” a strigat el.", "«Unde?» a zis."] {
+            assert!(messages(t).is_empty(), "{t}: {:?}", messages(t));
+        }
         assert!(check("Merge cu dl. Popescu... apoi pleacă.").is_empty());
     }
 
